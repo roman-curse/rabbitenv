@@ -49,6 +49,8 @@ func boolConf(key string, value string) {
 
 // initialize configuration
 func fillConfig() {
+	queueconfig = amqp.Table{}
+
 	queueconfig["port"] = os.Getenv("RABBITMQ_PORT")
 	if queueconfig["port"] == "" {
 		queueconfig["port"] = "5672"
