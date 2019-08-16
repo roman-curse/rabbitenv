@@ -13,6 +13,7 @@ var queueconfig amqp.Table
 var connection *amqp.Connection
 var channel *amqp.Channel
 var failLogger func(e string)
+var err error
 
 // failOnError handles default errors
 func failOnError(err error, msg string) {
@@ -31,13 +32,13 @@ func SetFailLogger(failFunction func(e string)) {
 	failLogger = failFunction
 }
 
-// GetConfig returns parameters for a queue connection
-func GetConfig() amqp.Table {
+// Config returns parameters for a queue connection
+func Config(key string) interface{} {
 	if queueconfig == nil {
 		fillConfig()
 	}
 
-	return queueconfig
+	return queueconfig[key]
 }
 
 // add bool config
@@ -61,6 +62,11 @@ func fillConfig() {
 		queueconfig["host"] = "localhost"
 	}
 
+	queueconfig["vhost"] = os.Getenv("RABBITMQ_VHOST")
+	if queueconfig["vhost"] == "" {
+		queueconfig["vhost"] = "/"
+	}
+
 	queueconfig["queue"] = os.Getenv("RABBITMQ_QUEUE")
 	if queueconfig["queue"] == "" {
 		queueconfig["queue"] = "signature"
@@ -69,6 +75,11 @@ func fillConfig() {
 	queueconfig["user"] = os.Getenv("RABBITMQ_USER")
 	if queueconfig["user"] == "" {
 		queueconfig["user"] = "guest"
+	}
+
+	queueconfig["pass"] = os.Getenv("RABBITMQ_PASS")
+	if queueconfig["pass"] == "" {
+		queueconfig["pass"] = "guest"
 	}
 
 	ack := os.Getenv("RABBITMQ_ACKNOWLADGE")
@@ -82,11 +93,6 @@ func fillConfig() {
 		noLocal = "false"
 	}
 	boolConf("noLocal", noLocal)
-
-	queueconfig["pass"] = os.Getenv("RABBITMQ_PASS")
-	if queueconfig["pass"] == "" {
-		queueconfig["pass"] = "guest"
-	}
 
 	// durable
 	durable := os.Getenv("RABBITMQ_DURABLE")
@@ -116,6 +122,30 @@ func fillConfig() {
 	}
 	boolConf("exclusive", exclusive)
 
+	//  exchange type
+	queueconfig["exchangeType"] = os.Getenv("RABBITMQ_EXCHANGE_TYPE")
+	if queueconfig["exchangeType"] == "" {
+		queueconfig["exchangeType"] = "direct"
+	}
+
+	// exchange internal
+	boolConf("internal", "false")
+
+	// mandatory
+	mandatory := os.Getenv("RABBITMQ_MANDATORY")
+	if mandatory == "" {
+		mandatory = "false"
+	}
+	boolConf("mandatory", mandatory)
+
+	// immediate
+	immediate := os.Getenv("RABBITMQ_IMMEDIATE")
+	if immediate == "" {
+		immediate = "false"
+	}
+	boolConf("immediate", immediate)
+
+	// exchange
 	queueconfig["exchange"] = os.Getenv("RABBITMQ_EXCHANGE")
 	if queueconfig["exchange"] == "" {
 		queueconfig["exchange"] = "exchange1"
@@ -126,78 +156,127 @@ func fillConfig() {
 }
 
 // Connect provides connection to the queue
-// returns connected amqp Channel
-func Connect(qConfig amqp.Table) (*amqp.Connection, error) {
+// returns error if any
+func Connect() error {
+
 	adress := fmt.Sprintf(
 		"amqp://%v:%v@%v:%v/",
-		qConfig["user"],
-		qConfig["pass"],
-		qConfig["host"],
-		qConfig["port"],
+		Config("user"),
+		Config("pass"),
+		Config("host"),
+		Config("port"),
 	)
 	log.Println(adress)
 
-	return amqp.Dial(adress)
+	connection, err = amqp.Dial(adress)
+	return err
 }
 
-// Channel returned
-func Channel(conn *amqp.Connection, qConfig amqp.Table) *amqp.Channel {
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
+// Channel forms channel
+func Channel() error {
+	if connection == nil {
+		err = Connect()
+		if err != nil {
+			return err
+		}
+	}
 
-	_, err = ch.QueueDeclare(
-		qConfig["queue"].(string),
-		qConfig["durable"].(bool),
-		qConfig["autoDelete"].(bool),
-		qConfig["exclusive"].(bool),
-		qConfig["noWait"].(bool),
+	channel, err = connection.Channel()
+	return err
+}
+
+// Exchange creation
+func Exchange(name string) error {
+
+	if channel == nil {
+		err = Channel()
+		if err != nil {
+			return err
+		}
+	}
+
+	err = channel.ExchangeDeclare(
+		name,
+		Config("exchangeType").(string),
+		Config("durable").(bool),
+		Config("autoDelete").(bool),
+		Config("internal").(bool),
+		Config("noWait").(bool),
+		nil,
+	)
+
+	return err
+}
+
+// Queue returnes declared Queue
+func Queue(name string) (amqp.Queue, error) {
+
+	if channel == nil {
+		err = Channel()
+		if err != nil {
+			return amqp.Queue{}, err
+		}
+	}
+
+	return channel.QueueDeclare(
+		name,
+		Config("durable").(bool),
+		Config("autoDelete").(bool),
+		Config("exclusive").(bool),
+		Config("noWait").(bool),
 		nil, // arguments
 	)
-	failOnError(err, "Failed to declare a queue")
-
-	return ch
 }
 
 // Listen the Queue
 func Listen() (<-chan amqp.Delivery, error) {
-	var err error
-	conf := GetConfig()
-	connection, err = Connect(conf)
-	failOnError(err, "Failed to Connect")
 
-	channel = Channel(connection, conf)
+	Queue(Config("queue").(string))
+	if err != nil {
+		return nil, err
+	}
+
 	return channel.Consume(
-		conf["queue"].(string),
-		conf["consumer"].(string),
-		conf["ack"].(bool),
-		conf["exclusive"].(bool),
-		conf["noLocal"].(bool),
-		conf["noWait"].(bool),
+		Config("queue").(string),
+		Config("consumer").(string),
+		Config("ack").(bool),
+		Config("exclusive").(bool),
+		Config("noLocal").(bool),
+		Config("noWait").(bool),
 		nil, // args
 	)
 }
 
-// Publish to the Queue
-func Publish(msg interface{}) error {
-	var err error
-	conf := GetConfig()
-	connection, err = Connect(conf)
-	failOnError(err, "Failed to Connect")
+// Publish to the Queue with the environment configs
+func Publish(msg amqp.Publishing) error {
 
-	channel = Channel(connection, conf)
-	channel.QueueDeclare(
-		conf["queue"].(string),
-		conf["durable"].(bool),
-		conf["autoDelete"].(bool),
-		conf["exclusive"].(bool),
-		conf["noWait"].(bool),
-		nil, // args
+	Exchange(Config("exchange").(string))
+	if err != nil {
+		return err
+	}
+
+	Queue(Config("queue").(string))
+	if err != nil {
+		return err
+	}
+
+	err = channel.QueueBind(
+		Config("queue").(string),
+		Config("exchange").(string), // routing key
+		Config("exchange").(string), // exchange
+		Config("noWait").(bool),
+		nil)
+
+	return channel.Publish(
+		Config("exchange").(string),
+		Config("queue").(string),
+		Config("mandatory").(bool),
+		Config("immediate").(bool),
+		msg,
 	)
-
-	return nil
 }
 
-// Close closes all connections
+// Close all connections
 func Close() {
 	channel.Close()
 	connection.Close()
