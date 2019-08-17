@@ -50,20 +50,21 @@ func boolConf(key string, value string) {
 
 // initialize configuration
 func fillConfig() {
+	var ok bool
 	queueconfig = amqp.Table{}
 
-	queueconfig["port"] = os.Getenv("RABBITMQ_PORT")
-	if queueconfig["port"] == "" {
+	queueconfig["port"], ok = os.LookupEnv("RABBITMQ_PORT")
+	if ok == false {
 		queueconfig["port"] = "5672"
 	}
 
-	queueconfig["host"] = os.Getenv("RABBITMQ_HOST")
-	if queueconfig["host"] == "" {
+	queueconfig["host"], ok = os.LookupEnv("RABBITMQ_HOST")
+	if ok == false {
 		queueconfig["host"] = "localhost"
 	}
 
-	queueconfig["vhost"] = os.Getenv("RABBITMQ_VHOST")
-	if queueconfig["vhost"] == "" {
+	queueconfig["vhost"], ok = os.LookupEnv("RABBITMQ_VHOST")
+	if ok == false {
 		queueconfig["vhost"] = "/"
 	}
 
@@ -122,6 +123,12 @@ func fillConfig() {
 	}
 	boolConf("exclusive", exclusive)
 
+	// exchange
+	queueconfig["exchange"], ok = os.LookupEnv("RABBITMQ_EXCHANGE")
+	if ok == false {
+		queueconfig["exchange"] = "exchange1"
+	}
+
 	//  exchange type
 	queueconfig["exchangeType"] = os.Getenv("RABBITMQ_EXCHANGE_TYPE")
 	if queueconfig["exchangeType"] == "" {
@@ -144,12 +151,6 @@ func fillConfig() {
 		immediate = "false"
 	}
 	boolConf("immediate", immediate)
-
-	// exchange
-	queueconfig["exchange"] = os.Getenv("RABBITMQ_EXCHANGE")
-	if queueconfig["exchange"] == "" {
-		queueconfig["exchange"] = "exchange1"
-	}
 
 	queueconfig["consumer"] = ""
 
@@ -194,16 +195,6 @@ func Exchange(name string) error {
 			return err
 		}
 	}
-
-	err = channel.ExchangeDeclare(
-		name,
-		Config("exchangeType").(string),
-		Config("durable").(bool),
-		Config("autoDelete").(bool),
-		Config("internal").(bool),
-		Config("noWait").(bool),
-		nil,
-	)
 
 	return err
 }
@@ -254,18 +245,6 @@ func Publish(msg amqp.Publishing) error {
 	if err != nil {
 		return err
 	}
-
-	Queue(Config("queue").(string))
-	if err != nil {
-		return err
-	}
-
-	err = channel.QueueBind(
-		Config("queue").(string),
-		Config("exchange").(string), // routing key
-		Config("exchange").(string), // exchange
-		Config("noWait").(bool),
-		nil)
 
 	return channel.Publish(
 		Config("exchange").(string),
