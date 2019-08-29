@@ -68,9 +68,14 @@ func fillConfig() {
 		queueconfig["vhost"] = "/"
 	}
 
-	queueconfig["queue"] = os.Getenv("RABBITMQ_QUEUE")
+	queueconfig["queue"] = os.Getenv("RABBITMQ_QUEUE_OWN")
 	if queueconfig["queue"] == "" {
 		queueconfig["queue"] = "signature"
+	}
+
+	queueconfig["queue_eng"] = os.Getenv("RABBITMQ_QUEUE_ENG")
+	if queueconfig["queue_eng"] == "" {
+		queueconfig["queue_eng"] = "write_files"
 	}
 
 	queueconfig["user"] = os.Getenv("RABBITMQ_USER")
@@ -248,7 +253,7 @@ func Publish(msg amqp.Publishing) error {
 
 	return channel.Publish(
 		Config("exchange").(string),
-		Config("queue").(string),
+		Config("queue_eng").(string),
 		Config("mandatory").(bool),
 		Config("immediate").(bool),
 		msg,
