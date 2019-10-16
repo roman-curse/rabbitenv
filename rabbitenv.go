@@ -180,6 +180,10 @@ func Connect() error {
 
 // Channel forms channel
 func Channel() error {
+	if channel != nil {
+		return nil
+	}
+
 	if connection == nil {
 		err = Connect()
 		if err != nil {
@@ -193,12 +197,9 @@ func Channel() error {
 
 // Exchange creation
 func Exchange(name string) error {
-
-	if channel == nil {
-		err = Channel()
-		if err != nil {
-			return err
-		}
+	err = Channel()
+	if err != nil {
+		return err
 	}
 
 	return err
@@ -243,6 +244,14 @@ func Listen() (<-chan amqp.Delivery, error) {
 	)
 }
 
+// RabbitFails func
+func RabbitFails() chan amqp.Return {
+	Channel()
+	ch := make(chan amqp.Return)
+
+	return channel.NotifyReturn(ch)
+}
+
 // Publish to the Queue with the environment configs
 func Publish(msg amqp.Publishing) error {
 
@@ -261,7 +270,14 @@ func Publish(msg amqp.Publishing) error {
 }
 
 // Close all connections
-func Close() {
-	channel.Close()
-	connection.Close()
+func Close() error {
+	CloseChannel()
+	return connection.Close()
+}
+
+// CloseChannel func closes the rabbitmq communication channel
+func CloseChannel() {
+	if channel != nil {
+		channel.Close()
+	}
 }
